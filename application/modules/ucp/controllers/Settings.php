@@ -1,5 +1,6 @@
 <?php
 
+use App\Config\Services;
 use CodeIgniter\Events\Events;
 use MX\MX_Controller;
 
@@ -19,6 +20,10 @@ class Settings extends MX_Controller
 
         //Make sure that we are logged in
         $this->user->userArea();
+
+        $this->load->library('form_validation');
+
+        $this->load->helper('cookie');
     }
 
     public function index()
@@ -35,7 +40,7 @@ class Settings extends MX_Controller
 
         $this->template->setTitle(lang("settings", "ucp"));
 
-        $settings_data = array(
+        $settings_data = [
             'nickname' => $this->user->getNickname(),
             'location' => $this->internal_user_model->getLocation(),
             'show_language_chooser' => $this->config->item('show_language_chooser'),
@@ -52,7 +57,7 @@ class Settings extends MX_Controller
                 "admin" => $this->config->item('ucp_admin'),
                 "gm" => $this->config->item('ucp_mod')
             ]
-        );
+        ];
 
         if ($this->config->item('show_language_chooser')) {
             $settings_data['languages'] = $this->language->getAllLanguages();
@@ -75,25 +80,51 @@ class Settings extends MX_Controller
 
     public function submit()
     {
+        if ($this->input->method() !== 'post') {
+            show_error('Invalid request', 403);
+        }
+
+        $this->form_validation->set_rules('old_password', lang("old_password", "ucp"), 'trim|required|min_length[6]');
+        $this->form_validation->set_rules('new_password', lang("new_password", "ucp"), 'trim|required|min_length[6]');
+
+        if ($this->form_validation->run() === false) {
+            $response = [
+                'status'  => 'error',
+                'message' => validation_errors()
+            ];
+            die(json_encode($response));
+        }
+
         $oldPassword = $this->input->post('old_password');
         $newPassword = $this->input->post('new_password');
 
-        if ($oldPassword && $newPassword) {
-            // Get the current password
-            $currentPassword = $this->user->getPassword();
+        // Get the current password
+        $currentPassword = $this->user->getPassword();
 
-            // Hash the entered password
-            $passwordHash = $this->user->getAccountPassword($this->user->getUsername(), $oldPassword);;
+        // Generate the verifier from the entered old password
+        $passwordHash = $this->user->getAccountPassword($this->user->getUsername(), $oldPassword);
 
-            // Check if passwords match
-            if (strtoupper($currentPassword) == strtoupper($passwordHash["verifier"])) {
-                $this->user->setPassword($newPassword);
-            } else {
-                die('no');
-            }
+        // Check if passwords match
+        if (strtoupper($currentPassword) === strtoupper($passwordHash["verifier"])) {
+            $this->user->setPassword($newPassword);
+
+            delete_cookie("fcms_username");
+            delete_cookie("fcms_password");
+
+            Services::session()->destroy();
+
+            $response = [
+                'status'  => 'success',
+                'message' => lang("changes_saved", "ucp")
+            ];
+        } else {
+            $response = [
+                'status'  => 'error',
+                'message' => lang("invalid_pw", "ucp")
+            ];
         }
 
-        die('yes');
+        die(json_encode($response));
     }
 
     public function submitInfo()
